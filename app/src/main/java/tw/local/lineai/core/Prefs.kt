@@ -26,7 +26,7 @@ object Prefs {
         get() = sp.getString("api_key", "")!!
         set(v) = sp.edit().putString("api_key", v).apply()
     var model: String
-        get() = sp.getString("model", "")!!.ifBlank { if (provider == "gemini") "gemini-2.5-flash" else "gpt-4o-mini" }
+        get() = sp.getString("model", "")!!.ifBlank { if (provider == "gemini") "gemini-3.8-flash" else "gpt-4o-mini" }
         set(v) = sp.edit().putString("model", v).apply()
     var endpoint: String  // openai-compatible base url
         get() = sp.getString("endpoint", "https://api.openai.com/v1")!!

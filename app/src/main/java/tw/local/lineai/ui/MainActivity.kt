@@ -52,7 +52,7 @@ class MainActivity : Activity() {
             text("供應商", bold = true)
             rowButtons(listOf("Gemini" to "gemini", "OpenAI 相容" to "openai"), Prefs.provider) { Prefs.provider = it; build() }
             field("API 金鑰", Prefs.apiKey, password = true) { Prefs.apiKey = it.trim() }
-            field("模型（留空用預設：${if (Prefs.provider == "gemini") "gemini-2.5-flash" else "gpt-4o-mini"}）", prefsModelRaw()) { Prefs.model = it.trim() }
+            field("模型（留空用預設：${if (Prefs.provider == "gemini") "gemini-3.8-flash" else "gpt-4o-mini"}）", prefsModelRaw()) { Prefs.model = it.trim() }
             if (Prefs.provider == "openai")
                 field("OpenAI 相容端點", Prefs.endpoint) { Prefs.endpoint = it.trim() }
             field("語氣／人設（給 AI 的指示）", Prefs.persona, lines = 4) { Prefs.persona = it }
