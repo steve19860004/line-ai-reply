@@ -97,7 +97,8 @@ class MainActivity : Activity() {
             if (Prefs.keywordEnabled) {
                 switch("命中關鍵字就不再問 AI（省費用、更可控）", Prefs.keywordSkipAi) { Prefs.keywordSkipAi = it }
                 field("規則（每行一條，格式：關鍵字=回覆；關鍵字可用逗號放多個）", Prefs.keywordRules, lines = 5) { Prefs.keywordRules = it }
-                text("範例：\n報價，多少錢，費用=洗一台室內機 1200 起，到府看更準喔\n地址=方便給我地址和樓層嗎？我安排時間過去", color = sub)
+                text("比對模式（加在關鍵字最前面）：\n・無標記＝包含即命中\n・[完全]在嗎=…（整句相同才命中）\n・[開頭]你好=…（開頭符合）\n・[任意]=…（任何訊息都回，放最後一行）\n回覆可用變數：{名字} {時間} {日期}", color = sub)
+                text("範例：\n報價，多少錢，費用=洗一台室內機 1200 起，到府看更準喔\n地址={名字}您好，方便給我地址和樓層嗎？", color = sub)
             }
         }
 
@@ -119,6 +120,14 @@ class MainActivity : Activity() {
                 button("清除「已回一次」紀錄") { Prefs.repliedContacts = emptySet(); toast("已清除"); build() }
             }
             switch("安全煞車（短時間回太多次自動切回擬稿，保護 LINE）", Prefs.safetyBrake) { Prefs.safetyBrake = it }
+            switch("新朋友自動歡迎語（第一次密你時先回一句）", Prefs.welcomeEnabled) { Prefs.welcomeEnabled = it; build() }
+            if (Prefs.welcomeEnabled) {
+                field("歡迎語（可用變數 {名字} {時間}）", Prefs.welcomeText, lines = 3) { Prefs.welcomeText = it }
+                if (Prefs.knownContacts.isNotEmpty())
+                    button("清除「已認識名單」（目前 ${Prefs.knownContacts.size} 人，清除後會重新歡迎）") {
+                        Prefs.knownContacts = emptySet(); toast("已清除"); build()
+                    }
+            }
         }
 
         // 6. 總開關
@@ -161,6 +170,32 @@ class MainActivity : Activity() {
             val evs = LineListener.events.toList()
             if (evs.isEmpty()) text("（還沒有事件。請白名單的人傳一句 LINE，再回來按重新整理。）", color = sub)
             else for (e in evs.take(50)) text(e, color = sub)
+        }
+
+        // 9. 設定備份
+        card("⑨ 設定備份（匯出／匯入）") {
+            text("把金鑰、人設、關鍵字規則等設定備份成一段文字，換機或重裝可還原。注意：匯出內容含 API 金鑰，請妥善保管、勿外流。", color = sub)
+            button("匯出設定（複製到剪貼簿）") {
+                val js = Prefs.exportJson()
+                (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("lineai", js))
+                showText("已複製設定（可貼到記事本保存）", js)
+            }
+            button("匯入設定（貼上文字）") {
+                val et = EditText(this@MainActivity).apply {
+                    hint = "貼上先前匯出的設定文字"
+                    setLines(6); gravity = Gravity.TOP
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                }
+                android.app.AlertDialog.Builder(this@MainActivity)
+                    .setTitle("匯入設定").setView(et)
+                    .setPositiveButton("匯入") { _, _ ->
+                        if (Prefs.importJson(et.text.toString())) { toast("匯入成功"); build() }
+                        else toast("格式錯誤，匯入失敗")
+                    }
+                    .setNegativeButton("取消", null).show()
+            }
         }
 
         hint("提醒：LINE 要開通知且開「顯示訊息內容」，否則讀不到內文。對個人帳號自動代回可能違反 LINE 條款，請自行評估。")

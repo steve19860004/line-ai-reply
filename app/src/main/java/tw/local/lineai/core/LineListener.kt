@@ -65,16 +65,24 @@ class LineListener : NotificationListenerService() {
             try { Thread.sleep(Prefs.delaySec * 1000L) } catch (_: Exception) {}
             if (!Prefs.enabled) return@bg
 
-            // B：關鍵字優先（命中可免 AI）
-            val kw = matchKeyword(text)
-            val ans: String = if (kw != null && Prefs.keywordSkipAi) {
-                log("關鍵字命中 →「$kw」"); kw
+            // 新朋友歡迎語：第一次遇到這個對話 → 先回歡迎語（之後正常流程）
+            val isNew = title !in Prefs.knownContacts
+            if (isNew) Prefs.knownContacts = Prefs.knownContacts + title
+            val base: String = if (Prefs.welcomeEnabled && isNew && Prefs.welcomeText.isNotBlank()) {
+                log("新朋友「$title」→ 歡迎語"); Prefs.welcomeText
             } else {
-                val ai = Ai.reply(text, title).getOrElse { log("AI 失敗：${it.message}"); return@bg }
-                if (ai.isBlank()) {
-                    if (kw != null) kw else { log("「$title」AI 判斷不回(空回覆)"); return@bg }
-                } else ai
+                // B：關鍵字優先（命中可免 AI）
+                val kw = matchKeyword(text)
+                if (kw != null && Prefs.keywordSkipAi) {
+                    log("關鍵字命中 →「$kw」"); kw
+                } else {
+                    val ai = Ai.reply(text, title).getOrElse { log("AI 失敗：${it.message}"); return@bg }
+                    if (ai.isBlank()) {
+                        if (kw != null) kw else { log("「$title」AI 判斷不回(空回覆)"); return@bg }
+                    } else ai
+                }
             }
+            val ans = applyVars(base, title)  // 變數替換 {名字}{時間}
 
             // C/D：是否允許自動送出
             val windowOk = inAutoWindow()
@@ -114,18 +122,47 @@ class LineListener : NotificationListenerService() {
         return last.getCharSequence("text")?.toString()?.trim()
     }
 
-    /** B：關鍵字比對，命中回傳固定回覆，否則 null。規則每行「關鍵字=回覆」，關鍵字可逗號多個。 */
+    /**
+     * B：關鍵字比對。規則每行「關鍵字=回覆」，關鍵字可逗號多個。
+     * 可在關鍵字前加模式標記：[完全] 完全相符、[開頭] 開頭符合、[任意] 任何訊息都回（放最後一行）；無標記＝包含。
+     */
     private fun matchKeyword(text: String): String? {
         if (!Prefs.keywordEnabled) return null
-        for (line in Prefs.keywordRules.lines()) {
+        for (raw in Prefs.keywordRules.lines()) {
+            val line = raw.trim()
+            if (line.isEmpty()) continue
             val i = line.indexOf('=')
-            if (i <= 0) continue
-            val kws = line.substring(0, i).split('，', ',').map { it.trim() }.filter { it.isNotEmpty() }
+            if (i < 0) continue
+            var left = line.substring(0, i).trim()
             val reply = line.substring(i + 1).trim()
             if (reply.isEmpty()) continue
-            if (kws.any { text.contains(it, true) }) return reply
+            var mode = 0  // 0 包含 1 完全 2 開頭 3 任意
+            when {
+                left.startsWith("[任意]") -> { mode = 3 }
+                left.startsWith("[完全]") -> { mode = 1; left = left.removePrefix("[完全]").trim() }
+                left.startsWith("[開頭]") -> { mode = 2; left = left.removePrefix("[開頭]").trim() }
+            }
+            if (mode == 3) return reply
+            val kws = left.split('，', ',').map { it.trim() }.filter { it.isNotEmpty() }
+            if (kws.isEmpty()) continue
+            val hit = when (mode) {
+                1 -> kws.any { text.equals(it, true) }
+                2 -> kws.any { text.startsWith(it, true) }
+                else -> kws.any { text.contains(it, true) }
+            }
+            if (hit) return reply
         }
         return null
+    }
+
+    /** 回覆裡的變數替換：{名字}{name}=對方暱稱、{時間}{time}=現在時間、{日期}{date}=今天。 */
+    private fun applyVars(s: String, sender: String): String {
+        val c = java.util.Calendar.getInstance()
+        val hm = String.format("%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+        val ymd = String.format("%d/%02d/%02d", c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH) + 1, c.get(java.util.Calendar.DAY_OF_MONTH))
+        return s.replace("{名字}", sender).replace("{name}", sender)
+            .replace("{時間}", hm).replace("{time}", hm)
+            .replace("{日期}", ymd).replace("{date}", ymd)
     }
 
     /** C：現在是否在「可自動送出」的時段（支援跨午夜）。 */
