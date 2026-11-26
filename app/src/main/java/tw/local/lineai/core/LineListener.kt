@@ -23,21 +23,21 @@ class LineListener : NotificationListenerService() {
     override fun onListenerDisconnected() { connected = false }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (!Prefs.enabled) return
         val pkg = sbn.packageName ?: return
         if (pkg == packageName) return  // 忽略本 App 自己發的通知
-        // 診斷：記下所有通知來源，確認監聽有在運作、以及 LINE 的實際套件名
-        log("· 通知來源：$pkg" + if (pkg.contains("line", true)) "  ← LINE" else "")
-        if (pkg != LINE_PKG) return
+        if (pkg != LINE_PKG) { if (Prefs.enabled) log("· 通知來源：$pkg"); return }
+
         val n = sbn.notification ?: return
         val ex = n.extras
-
         val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
         val text = latestMessage(ex) ?: ex.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
 
-        // LINE 會發摘要通知（無標題），略過不吵
+        // A：訊息備份／收回救回（常駐，不受總開關影響）
+        if (!title.isNullOrBlank() && text.isNotBlank()) MsgStore.add(this, title, text)
+
+        // 以下為「自動回覆」邏輯，需要總開關
+        if (!Prefs.enabled) return
         if (title.isNullOrBlank()) return
-        // 診斷：只要是有內文的 LINE 通知就先記一筆，方便看到底收到什麼
         val hasAction = n.actions?.any { !it.remoteInputs.isNullOrEmpty() } == true
         if (text.isBlank()) { log("「$title」無文字(貼圖/圖片)，略過"); return }
         log("偵測到「$title」：$text（回覆鈕：${if (hasAction) "有" else "無"}）")
@@ -60,21 +60,49 @@ class LineListener : NotificationListenerService() {
         val now = System.currentTimeMillis()
         if (now - (lastReplyAt[key] ?: 0) < Prefs.delaySec * 1000L) { log("「$title」間隔太短，略過"); return }
 
-        log("收到「$title」：$text → AI 處理中…")
+        log("收到「$title」：$text → 處理中…")
         App.bg {
             try { Thread.sleep(Prefs.delaySec * 1000L) } catch (_: Exception) {}
             if (!Prefs.enabled) return@bg
-            val ans = Ai.reply(text, title).getOrElse {
-                log("AI 失敗：${it.message}"); return@bg
+
+            // B：關鍵字優先（命中可免 AI）
+            val kw = matchKeyword(text)
+            val ans: String = if (kw != null && Prefs.keywordSkipAi) {
+                log("關鍵字命中 →「$kw」"); kw
+            } else {
+                val ai = Ai.reply(text, title).getOrElse { log("AI 失敗：${it.message}"); return@bg }
+                if (ai.isBlank()) {
+                    if (kw != null) kw else { log("「$title」AI 判斷不回(空回覆)"); return@bg }
+                } else ai
             }
-            if (ans.isBlank()) { log("「$title」AI 判斷不回(空回覆)"); return@bg }
-            if (Prefs.autoSend && action != null) {
+
+            // C/D：是否允許自動送出
+            val windowOk = inAutoWindow()
+            val alreadyOnce = Prefs.replyOnce && Prefs.repliedContacts.any { title.equals(it, true) }
+            val autoAllowed = Prefs.autoSend && action != null && windowOk && !alreadyOnce
+
+            if (autoAllowed) {
+                // E：安全煞車（短時間自動回太多次 → 疑似迴圈，切回擬稿保護 LINE）
+                if (Prefs.safetyBrake && recentReplies() >= BRAKE_MAX) {
+                    Prefs.autoSend = false
+                    log("⚠️ 短時間自動回太多次，已自動切回擬稿保護 LINE")
+                    deliverDraft(this, title, text, ans, action, openIntent)
+                    return@bg
+                }
                 val ok = fireReply(this, action, ans)
                 lastReplyAt[key] = System.currentTimeMillis()
-                if (ok) lastSentReply[key] = ans  // 記住剛送出的，避免被自己的回覆觸發迴圈
+                if (ok) {
+                    lastSentReply[key] = ans  // 記住剛送出的，避免被自己的回覆觸發迴圈
+                    replyTimes.addFirst(System.currentTimeMillis())
+                    if (Prefs.replyOnce) Prefs.repliedContacts = Prefs.repliedContacts + title
+                }
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
             } else {
-                if (Prefs.autoSend && action == null) log("「$title」通知無回覆按鈕，無法自動送出，改擬稿")
+                when {
+                    Prefs.autoSend && !windowOk -> log("「$title」非自動時段，改擬稿")
+                    Prefs.autoSend && alreadyOnce -> log("「$title」已自動回過一次，改擬稿交給你")
+                    Prefs.autoSend && action == null -> log("「$title」無回覆鈕，改擬稿")
+                }
                 deliverDraft(this, title, text, ans, action, openIntent)
             }
         }
@@ -84,6 +112,35 @@ class LineListener : NotificationListenerService() {
         val arr = ex.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return null
         val last = arr.lastOrNull() as? Bundle ?: return null
         return last.getCharSequence("text")?.toString()?.trim()
+    }
+
+    /** B：關鍵字比對，命中回傳固定回覆，否則 null。規則每行「關鍵字=回覆」，關鍵字可逗號多個。 */
+    private fun matchKeyword(text: String): String? {
+        if (!Prefs.keywordEnabled) return null
+        for (line in Prefs.keywordRules.lines()) {
+            val i = line.indexOf('=')
+            if (i <= 0) continue
+            val kws = line.substring(0, i).split('，', ',').map { it.trim() }.filter { it.isNotEmpty() }
+            val reply = line.substring(i + 1).trim()
+            if (reply.isEmpty()) continue
+            if (kws.any { text.contains(it, true) }) return reply
+        }
+        return null
+    }
+
+    /** C：現在是否在「可自動送出」的時段（支援跨午夜）。 */
+    private fun inAutoWindow(): Boolean {
+        if (!Prefs.hoursEnabled) return true
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val s = Prefs.hoursStart; val e = Prefs.hoursEnd
+        return if (s <= e) h in s until e else (h >= s || h < e)
+    }
+
+    /** E：最近 60 秒內自動送出的次數。 */
+    private fun recentReplies(): Int {
+        val now = System.currentTimeMillis()
+        while (replyTimes.isNotEmpty() && now - (replyTimes.peekLast() ?: now) > 60_000L) replyTimes.pollLast()
+        return replyTimes.size
     }
 
     private fun toast(s: String) = App.ui {
@@ -97,6 +154,8 @@ class LineListener : NotificationListenerService() {
         private val lastHandled = ConcurrentHashMap<String, String>()
         private val lastReplyAt = ConcurrentHashMap<String, Long>()
         private val lastSentReply = ConcurrentHashMap<String, String>()  // 每個對話最後一次自動送出的內容
+        private val replyTimes = java.util.concurrent.ConcurrentLinkedDeque<Long>()  // E：自動送出時間戳
+        private const val BRAKE_MAX = 6  // 60 秒內自動送出超過此數 → 觸發安全煞車
 
         // 最近事件（除錯用）
         val events = java.util.concurrent.ConcurrentLinkedDeque<String>()
