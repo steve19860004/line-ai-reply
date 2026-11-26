@@ -41,7 +41,7 @@ class LineListener : NotificationListenerService() {
         }
 
         val action = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
-        if (action == null) { log("「$title」此通知沒有回覆按鈕，無法送出"); return }
+        val openIntent = n.contentIntent  // 開啟該 LINE 對話用（沒有回覆鈕時的備援）
 
         val key = sbn.key ?: title
         if (lastHandled[key] == text) return  // 同一句不重複
@@ -57,16 +57,13 @@ class LineListener : NotificationListenerService() {
                 log("AI 失敗：${it.message}"); return@bg
             }
             if (ans.isBlank()) { log("「$title」AI 判斷不回(空回覆)"); return@bg }
-            if (Prefs.autoSend) {
+            if (Prefs.autoSend && action != null) {
                 val ok = fireReply(this, action, ans)
                 lastReplyAt[key] = System.currentTimeMillis()
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
-            } else if (Prefs.useOverlay && Overlay.canShow(this)) {
-                Overlay.show(this, title, text, ans, action)
-                log("已擬稿給「$title」：$ans（看懸浮視窗）")
             } else {
-                postDraft(this, title, ans, action)
-                log("已擬稿給「$title」：$ans（看通知按送出）")
+                if (Prefs.autoSend && action == null) log("「$title」通知無回覆按鈕，無法自動送出，改擬稿")
+                deliverDraft(this, title, text, ans, action, openIntent)
             }
         }
     }
@@ -99,7 +96,25 @@ class LineListener : NotificationListenerService() {
         // 擬稿模式：暫存通知自帶的回覆動作，等使用者按「送出」再觸發
         val heldActions = ConcurrentHashMap<Int, Notification.Action>()
         val heldTexts = ConcurrentHashMap<Int, String>()
+        val heldOpen = ConcurrentHashMap<Int, PendingIntent>()
         private var seq = 1000
+
+        fun copyTo(ctx: Context, text: String) {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("reply", text))
+        }
+
+        /** 依設定選擇用懸浮視窗或通知顯示草稿。 */
+        fun deliverDraft(ctx: Context, sender: String, incoming: String, draft: String,
+                         action: Notification.Action?, openIntent: PendingIntent?) {
+            if (Prefs.useOverlay && Overlay.canShow(ctx)) {
+                Overlay.show(ctx, sender, incoming, draft, action, openIntent)
+                log("已擬稿給「$sender」：$draft（看懸浮視窗）")
+            } else {
+                postDraft(ctx, sender, draft, action, openIntent)
+                log("已擬稿給「$sender」：$draft（看通知）")
+            }
+        }
 
         fun ensureChannel(ctx: Context) {
             val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -120,11 +135,12 @@ class LineListener : NotificationListenerService() {
             return runCatching { action.actionIntent.send(ctx, 0, intent) }.isSuccess
         }
 
-        /** 擬稿：發一則自家通知，顯示草稿，附「送出／略過」。 */
-        fun postDraft(ctx: Context, sender: String, draft: String, action: Notification.Action) {
+        /** 擬稿：發一則自家通知，顯示草稿，附「送出／略過」。無回覆鈕時送出＝複製並開啟 LINE。 */
+        fun postDraft(ctx: Context, sender: String, draft: String, action: Notification.Action?, openIntent: PendingIntent?) {
             ensureChannel(ctx)
             val id = seq++
-            heldActions[id] = action
+            if (action != null) heldActions[id] = action
+            if (openIntent != null) heldOpen[id] = openIntent
             heldTexts[id] = draft
             val send = PendingIntent.getBroadcast(
                 ctx, id, Intent(ctx, ReplyReceiver::class.java).putExtra("id", id).setAction("send"),
@@ -134,12 +150,13 @@ class LineListener : NotificationListenerService() {
                 ctx, id + 100000, Intent(ctx, ReplyReceiver::class.java).putExtra("id", id).setAction("skip"),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+            val sendLabel = if (action != null) "送出" else "複製並開啟 LINE"
             val n = Notification.Builder(ctx, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_send)
                 .setContentTitle("AI 擬稿給 $sender")
                 .setContentText(draft)
                 .setStyle(Notification.BigTextStyle().bigText(draft))
-                .addAction(Notification.Action.Builder(null, "送出", send).build())
+                .addAction(Notification.Action.Builder(null, sendLabel, send).build())
                 .addAction(Notification.Action.Builder(null, "略過", skip).build())
                 .setAutoCancel(true)
                 .build()
