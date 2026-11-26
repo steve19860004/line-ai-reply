@@ -89,8 +89,38 @@ class MainActivity : Activity() {
             }
         }
 
-        // 4. 總開關
-        card("④ 總開關") {
+        // 4. 關鍵字自動回（免 AI）
+        card("④ 關鍵字自動回（免 AI）") {
+            switch("啟用關鍵字自動回", Prefs.keywordEnabled) { Prefs.keywordEnabled = it; build() }
+            if (Prefs.keywordEnabled) {
+                switch("命中關鍵字就不再問 AI（省費用、更可控）", Prefs.keywordSkipAi) { Prefs.keywordSkipAi = it }
+                field("規則（每行一條，格式：關鍵字=回覆；關鍵字可用逗號放多個）", Prefs.keywordRules, lines = 5) { Prefs.keywordRules = it }
+                text("範例：\n報價，多少錢，費用=洗一台室內機 1200 起，到府看更準喔\n地址=方便給我地址和樓層嗎？我安排時間過去", color = sub)
+            }
+        }
+
+        // 5. 進階自動回規則
+        card("⑤ 進階（時段／只回一次／安全煞車）") {
+            switch("只在指定時段才自動送出", Prefs.hoursEnabled) { Prefs.hoursEnabled = it; build() }
+            if (Prefs.hoursEnabled) {
+                field("開始（0-23 時）", Prefs.hoursStart.toString(), number = true) {
+                    Prefs.hoursStart = it.toIntOrNull()?.coerceIn(0, 23) ?: 18
+                }
+                field("結束（0-23 時，可跨午夜）", Prefs.hoursEnd.toString(), number = true) {
+                    Prefs.hoursEnd = it.toIntOrNull()?.coerceIn(0, 23) ?: 8
+                }
+                text("目前：${Prefs.hoursStart} 點～${Prefs.hoursEnd} 點自動送出，其餘時間只擬稿。例如 18～8＝晚上到隔天早上自動回。", color = sub)
+            }
+            switch("每個對話只自動回一次（之後交給你）", Prefs.replyOnce) { Prefs.replyOnce = it; build() }
+            if (Prefs.replyOnce && Prefs.repliedContacts.isNotEmpty()) {
+                text("已自動回過：${Prefs.repliedContacts.joinToString("、")}", color = sub)
+                button("清除「已回一次」紀錄") { Prefs.repliedContacts = emptySet(); toast("已清除"); build() }
+            }
+            switch("安全煞車（短時間回太多次自動切回擬稿，保護 LINE）", Prefs.safetyBrake) { Prefs.safetyBrake = it }
+        }
+
+        // 6. 總開關
+        card("⑥ 總開關") {
             val listenerOk = notifAccessOn() && LineListener.connected
             switch("啟用 LINE AI 回覆", Prefs.enabled) { on ->
                 if (on && !notifAccessOn()) { toast("請先開啟通知讀取權限"); Prefs.enabled = false; build(); return@switch }
@@ -109,12 +139,26 @@ class MainActivity : Activity() {
             }
             text("※ 想在睡覺／螢幕關閉時也自動回，請：開「全自動送出」＋關省電限制；vivo／小米另到設定開本 App 的「自啟動」。", color = sub)
         }
-        // 5. 最近事件（除錯）
-        card("⑤ 最近事件（除錯用）") {
+        // 7. 訊息備份／收回救回
+        card("⑦ 訊息備份／收回救回") {
+            text("自動存下每一則收到的文字訊息，對方「收回」後這裡仍看得到原文。常駐，不受總開關影響。", color = sub)
+            button("重新整理") { build() }
+            val msgs = tw.local.lineai.core.MsgStore.recent(this@MainActivity, 30)
+            if (msgs.isEmpty()) text("（還沒有備份。收到 LINE 文字訊息後會自動出現。）", color = sub)
+            else {
+                text("共備份 ${tw.local.lineai.core.MsgStore.count(this@MainActivity)} 則，顯示最近 30 則：", color = sub)
+                val tf = java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.US)
+                for (m in msgs) text("${tf.format(java.util.Date(m.time))}  ${m.sender}：${m.text}", color = sub)
+                button("清空備份") { tw.local.lineai.core.MsgStore.clear(this@MainActivity); toast("已清空"); build() }
+            }
+        }
+
+        // 8. 最近事件（除錯）
+        card("⑧ 最近事件（除錯用）") {
             button("重新整理") { build() }
             val evs = LineListener.events.toList()
             if (evs.isEmpty()) text("（還沒有事件。請白名單的人傳一句 LINE，再回來按重新整理。）", color = sub)
-            else for (e in evs.take(25)) text(e, color = sub)
+            else for (e in evs.take(50)) text(e, color = sub)
         }
 
         hint("提醒：LINE 要開通知且開「顯示訊息內容」，否則讀不到內文。對個人帳號自動代回可能違反 LINE 條款，請自行評估。")
