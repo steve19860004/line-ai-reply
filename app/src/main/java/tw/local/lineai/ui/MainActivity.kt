@@ -74,6 +74,9 @@ class MainActivity : Activity() {
                 text(if (ov) "懸浮窗權限：已開 ✓" else "懸浮窗權限：未開 ✗（擬稿卡才跳得出來）", color = if (ov) sub else bad)
                 if (!ov) button("前往開啟懸浮窗權限", primary = true) {
                     startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+                } else button("測試懸浮窗（顯示假草稿）") {
+                    if (tw.local.lineai.core.Overlay.canShow(this@MainActivity)) tw.local.lineai.core.Overlay.showTest(this@MainActivity)
+                    else toast("懸浮窗權限未開")
                 }
             }
             switch("也自動回群組", Prefs.replyGroups) { Prefs.replyGroups = it }

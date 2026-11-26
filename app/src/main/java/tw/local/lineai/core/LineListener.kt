@@ -18,6 +18,7 @@ class LineListener : NotificationListenerService() {
     override fun onListenerConnected() {
         connected = true
         ensureChannel(this)
+        log("通知監聽已連線")
     }
     override fun onListenerDisconnected() { connected = false }
 
