@@ -56,6 +56,8 @@ class MainActivity : Activity() {
             if (Prefs.provider == "openai")
                 field("OpenAI 相容端點", Prefs.endpoint) { Prefs.endpoint = it.trim() }
             field("語氣／人設（給 AI 的指示）", Prefs.persona, lines = 4) { Prefs.persona = it }
+            button("套用人設範例") { pickPersonaTemplate() }
+            button("用 AI 幫我產生人設") { generatePersona() }
             button("測試 AI（擬一句回覆）") {
                 toast("測試中…")
                 App.bg {
@@ -244,4 +246,50 @@ class MainActivity : Activity() {
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
     private fun showText(t: String, b: String) =
         android.app.AlertDialog.Builder(this).setTitle(t).setMessage(b).setPositiveButton("好", null).show()
+
+    // 選內建人設範例
+    private fun pickPersonaTemplate() {
+        val tpl = tw.local.lineai.core.PersonaTemplates.list
+        val names = tpl.map { it.first }.toTypedArray()
+        android.app.AlertDialog.Builder(this)
+            .setTitle("選一個人設範例")
+            .setItems(names) { _, i ->
+                Prefs.persona = tpl[i].second
+                toast("已套用：${names[i]}"); build()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    // 用 AI 依描述產生人設
+    private fun generatePersona() {
+        val et = EditText(this).apply {
+            setText("專業冷氣師傅，親切口氣，會先問地址和冷氣品牌型號、問題狀況，並說師傅看到會親自回")
+            setLines(4); gravity = Gravity.TOP
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("描述你要的身分／語氣")
+            .setView(et)
+            .setPositiveButton("產生") { _, _ ->
+                toast("AI 產生中…")
+                App.bg {
+                    val r = Ai.makePersona(et.text.toString())
+                    App.ui {
+                        val txt = r.getOrElse { "失敗：${it.message}" }
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("產生結果（可直接套用）")
+                            .setMessage(txt)
+                            .setPositiveButton("套用") { _, _ ->
+                                if (r.isSuccess && txt.isNotBlank()) { Prefs.persona = txt; toast("已套用"); build() }
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
 }

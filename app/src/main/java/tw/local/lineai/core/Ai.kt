@@ -20,6 +20,19 @@ object Ai {
         text.trim()
     }
 
+    /** 用 AI 把一段描述改寫成完整的「人設／語氣指示」。 */
+    fun makePersona(desc: String): Result<String> = runCatching {
+        val key = Prefs.apiKey
+        require(key.isNotBlank()) { "尚未設定 API 金鑰" }
+        require(desc.isNotBlank()) { "請先描述你要的身分或語氣" }
+        val sys = "你是提示詞工程師。請把使用者的描述，改寫成一段「要交給另一個 AI 看的人設／語氣指示」，用繁體中文、第二人稱（你是…）。要具體寫出：身分與立場、說話語氣、回覆長度（一到兩句）、該做與不該做（例如不要像制式客服、不要加開頭招呼或署名、看不懂或不該代答就回空字串）。只輸出那段指示本身，不要加任何前後說明或引號。"
+        val out = when (Prefs.provider) {
+            "openai" -> callOpenAi(sys, desc, key)
+            else -> callGemini(sys, desc, key)
+        }
+        out.trim()
+    }
+
     private val RETRY = setOf(429, 500, 502, 503, 504)
 
     private fun post(urlStr: String, body: JSONObject, headers: Map<String, String>): String {
