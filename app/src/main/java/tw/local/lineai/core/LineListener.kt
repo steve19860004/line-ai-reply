@@ -32,6 +32,9 @@ class LineListener : NotificationListenerService() {
         val text = latestMessage(ex) ?: ex.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
         if (text.isBlank()) { log("「$title」無文字(可能貼圖/圖片)，略過"); return }
 
+        // 防回覆迴圈：這則通知已經被回覆過（含我們自己送出的），就不要再處理
+        if (!ex.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY).isNullOrEmpty()) return
+
         val isGroup = ex.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false)
         if (isGroup && !Prefs.replyGroups) { log("「$title」是群組，略過"); return }
 
@@ -44,6 +47,7 @@ class LineListener : NotificationListenerService() {
         val openIntent = n.contentIntent  // 開啟該 LINE 對話用（沒有回覆鈕時的備援）
 
         val key = sbn.key ?: title
+        if (text == lastSentReply[key]) return  // 這句正是我們剛送出的回覆（回聲），略過
         if (lastHandled[key] == text) return  // 同一句不重複
         lastHandled[key] = text
         val now = System.currentTimeMillis()
@@ -60,6 +64,7 @@ class LineListener : NotificationListenerService() {
             if (Prefs.autoSend && action != null) {
                 val ok = fireReply(this, action, ans)
                 lastReplyAt[key] = System.currentTimeMillis()
+                if (ok) lastSentReply[key] = ans  // 記住剛送出的，避免被自己的回覆觸發迴圈
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
             } else {
                 if (Prefs.autoSend && action == null) log("「$title」通知無回覆按鈕，無法自動送出，改擬稿")
@@ -84,6 +89,7 @@ class LineListener : NotificationListenerService() {
         @Volatile var connected = false
         private val lastHandled = ConcurrentHashMap<String, String>()
         private val lastReplyAt = ConcurrentHashMap<String, Long>()
+        private val lastSentReply = ConcurrentHashMap<String, String>()  // 每個對話最後一次自動送出的內容
 
         // 最近事件（除錯用）
         val events = java.util.concurrent.ConcurrentLinkedDeque<String>()
