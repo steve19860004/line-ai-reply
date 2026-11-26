@@ -20,20 +20,28 @@ object Ai {
         text.trim()
     }
 
+    private val RETRY = setOf(429, 500, 502, 503, 504)
+
     private fun post(urlStr: String, body: JSONObject, headers: Map<String, String>): String {
-        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 15000; readTimeout = 30000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json")
-            headers.forEach { (k, v) -> setRequestProperty(k, v) }
+        var last = ""
+        for (attempt in 0..2) {
+            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15000; readTimeout = 30000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                headers.forEach { (k, v) -> setRequestProperty(k, v) }
+            }
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val resp = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (code in 200..299) return resp
+            last = "HTTP $code：${resp.take(300)}"
+            if (code in RETRY && attempt < 2) { try { Thread.sleep(1500L * (attempt + 1)) } catch (_: Exception) {}; continue }
+            error(last)
         }
-        conn.outputStream.use { it.write(body.toString().toByteArray()) }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val resp = stream?.bufferedReader()?.use { it.readText() } ?: ""
-        if (code !in 200..299) error("HTTP $code：${resp.take(300)}")
-        return resp
+        error(last)
     }
 
     private fun callGemini(sys: String, user: String, key: String): String {
