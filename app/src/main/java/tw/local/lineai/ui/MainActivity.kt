@@ -68,6 +68,14 @@ class MainActivity : Activity() {
         // 3. 回覆模式與範圍
         card("③ 回覆模式與範圍") {
             switch("全自動送出（關＝只擬稿待你按送出）", Prefs.autoSend) { Prefs.autoSend = it }
+            switch("草稿用懸浮視窗顯示（可當場編輯，比通知好用）", Prefs.useOverlay) { Prefs.useOverlay = it; build() }
+            if (Prefs.useOverlay) {
+                val ov = Settings.canDrawOverlays(this@MainActivity)
+                text(if (ov) "懸浮窗權限：已開 ✓" else "懸浮窗權限：未開 ✗（擬稿卡才跳得出來）", color = if (ov) sub else bad)
+                if (!ov) button("前往開啟懸浮窗權限", primary = true) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+                }
+            }
             switch("也自動回群組", Prefs.replyGroups) { Prefs.replyGroups = it }
             switch("只回白名單聯絡人", Prefs.onlyWhitelist) { Prefs.onlyWhitelist = it }
             field("白名單（對話名稱，用逗號分隔）", Prefs.whitelist.joinToString("，")) {

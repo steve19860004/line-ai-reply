@@ -18,6 +18,11 @@ object Prefs {
         get() = sp.getBoolean("auto_send", false)
         set(v) = sp.edit().putBoolean("auto_send", v).apply()
 
+    // 擬稿用懸浮視窗顯示（而非通知）
+    var useOverlay: Boolean
+        get() = sp.getBoolean("use_overlay", true)
+        set(v) = sp.edit().putBoolean("use_overlay", v).apply()
+
     // AI 設定
     var provider: String  // "gemini" | "openai"
         get() = sp.getString("provider", "gemini")!!
