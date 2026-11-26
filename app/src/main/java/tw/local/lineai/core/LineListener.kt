@@ -27,41 +27,42 @@ class LineListener : NotificationListenerService() {
         val n = sbn.notification ?: return
         val ex = n.extras
 
-        // 取最新一句訊息與對話名稱
         val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: return
         val text = latestMessage(ex) ?: ex.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
-        if (text.isBlank()) return
+        if (text.isBlank()) { log("「$title」無文字(可能貼圖/圖片)，略過"); return }
 
-        // 群組過濾
         val isGroup = ex.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false)
-        if (isGroup && !Prefs.replyGroups) return
+        if (isGroup && !Prefs.replyGroups) { log("「$title」是群組，略過"); return }
 
-        // 白名單
-        if (Prefs.onlyWhitelist && title !in Prefs.whitelist) return
+        // 白名單：模糊比對（名稱有包含即可，不分大小寫）
+        if (Prefs.onlyWhitelist && Prefs.whitelist.none { title.contains(it, true) }) {
+            log("「$title」不在白名單，略過"); return
+        }
 
-        // 找出通知自帶的「回覆」動作（含 RemoteInput）
-        val action = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() } ?: return
+        val action = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
+        if (action == null) { log("「$title」此通知沒有回覆按鈕，無法送出"); return }
 
         val key = sbn.key ?: title
-        // 去重：同一對話同一句不重複處理
-        if (lastHandled[key] == text) return
+        if (lastHandled[key] == text) return  // 同一句不重複
         lastHandled[key] = text
-        // 防洗版：同一對話最短間隔
         val now = System.currentTimeMillis()
-        if (now - (lastReplyAt[key] ?: 0) < Prefs.delaySec * 1000L) return
+        if (now - (lastReplyAt[key] ?: 0) < Prefs.delaySec * 1000L) { log("「$title」間隔太短，略過"); return }
 
+        log("收到「$title」：$text → AI 處理中…")
         App.bg {
             try { Thread.sleep(Prefs.delaySec * 1000L) } catch (_: Exception) {}
             if (!Prefs.enabled) return@bg
             val ans = Ai.reply(text, title).getOrElse {
-                App.ui { toast("AI 失敗：${it.message}") }; return@bg
+                log("AI 失敗：${it.message}"); return@bg
             }
-            if (ans.isBlank()) return@bg
+            if (ans.isBlank()) { log("「$title」AI 判斷不回(空回覆)"); return@bg }
             if (Prefs.autoSend) {
-                fireReply(this, action, ans)
+                val ok = fireReply(this, action, ans)
                 lastReplyAt[key] = System.currentTimeMillis()
+                log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
             } else {
                 postDraft(this, title, ans, action)
+                log("已擬稿給「$title」：$ans（看通知按送出）")
             }
         }
     }
@@ -82,6 +83,14 @@ class LineListener : NotificationListenerService() {
         @Volatile var connected = false
         private val lastHandled = ConcurrentHashMap<String, String>()
         private val lastReplyAt = ConcurrentHashMap<String, Long>()
+
+        // 最近事件（除錯用）
+        val events = java.util.concurrent.ConcurrentLinkedDeque<String>()
+        private val tf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+        fun log(s: String) {
+            events.addFirst(tf.format(java.util.Date()) + "  " + s)
+            while (events.size > 25) events.pollLast()
+        }
 
         // 擬稿模式：暫存通知自帶的回覆動作，等使用者按「送出」再觸發
         val heldActions = ConcurrentHashMap<Int, Notification.Action>()

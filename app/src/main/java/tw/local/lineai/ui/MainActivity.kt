@@ -91,6 +91,14 @@ class MainActivity : Activity() {
                 else "未啟用", color = sub
             )
         }
+        // 5. 最近事件（除錯）
+        card("⑤ 最近事件（除錯用）") {
+            button("重新整理") { build() }
+            val evs = LineListener.events.toList()
+            if (evs.isEmpty()) text("（還沒有事件。請白名單的人傳一句 LINE，再回來按重新整理。）", color = sub)
+            else for (e in evs.take(25)) text(e, color = sub)
+        }
+
         hint("提醒：LINE 要開通知且開「顯示訊息內容」，否則讀不到內文。對個人帳號自動代回可能違反 LINE 條款，請自行評估。")
     }
 
