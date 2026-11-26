@@ -24,7 +24,11 @@ class LineListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!Prefs.enabled) return
-        if (sbn.packageName != LINE_PKG) return
+        val pkg = sbn.packageName ?: return
+        if (pkg == packageName) return  // 忽略本 App 自己發的通知
+        // 診斷：記下所有通知來源，確認監聽有在運作、以及 LINE 的實際套件名
+        log("· 通知來源：$pkg" + if (pkg.contains("line", true)) "  ← LINE" else "")
+        if (pkg != LINE_PKG) return
         val n = sbn.notification ?: return
         val ex = n.extras
 
@@ -99,7 +103,7 @@ class LineListener : NotificationListenerService() {
         private val tf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
         fun log(s: String) {
             events.addFirst(tf.format(java.util.Date()) + "  " + s)
-            while (events.size > 25) events.pollLast()
+            while (events.size > 50) events.pollLast()
         }
 
         // 擬稿模式：暫存通知自帶的回覆動作，等使用者按「送出」再觸發
