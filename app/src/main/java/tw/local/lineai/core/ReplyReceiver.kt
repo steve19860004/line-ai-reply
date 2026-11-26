@@ -11,9 +11,17 @@ class ReplyReceiver : BroadcastReceiver() {
         val id = intent.getIntExtra("id", -1)
         if (id < 0) return
         val action = LineListener.heldActions.remove(id)
+        val open = LineListener.heldOpen.remove(id)
         val text = LineListener.heldTexts.remove(id)
-        if (intent.action == "send" && action != null && text != null) {
-            LineListener.fireReply(ctx, action, text)
+        if (intent.action == "send" && text != null) {
+            if (action != null) {
+                LineListener.fireReply(ctx, action, text)
+            } else {
+                // 沒有回覆鈕：複製草稿並開啟該 LINE 對話，讓使用者貼上送出
+                LineListener.copyTo(ctx, text)
+                runCatching { open?.send() }
+                android.widget.Toast.makeText(ctx, "已複製回覆，請在 LINE 長按貼上送出", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
         ctx.getSystemService(NotificationManager::class.java).cancel(id)
     }

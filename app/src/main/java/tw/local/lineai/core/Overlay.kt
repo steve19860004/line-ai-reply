@@ -31,9 +31,10 @@ object Overlay {
     }
 
     /** 測試用：顯示一張假草稿卡，驗證懸浮窗會不會出現。 */
-    fun showTest(ctx: Context) = show(ctx, "測試好友", "在嗎？晚上有空嗎", "有啊，怎麼了？", null)
+    fun showTest(ctx: Context) = show(ctx, "測試好友", "在嗎？晚上有空嗎", "有啊，怎麼了？", null, null, test = true)
 
-    fun show(ctx: Context, sender: String, incoming: String, draft: String, action: Notification.Action?) {
+    fun show(ctx: Context, sender: String, incoming: String, draft: String,
+             action: Notification.Action?, openIntent: android.app.PendingIntent?, test: Boolean = false) {
         App.ui {
             if (!canShow(ctx)) return@ui
             runCatching { view?.let { wm?.removeView(it) } }
@@ -67,13 +68,21 @@ object Overlay {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) }
                 setOnClickListener { onClick() }
             }
-            rowBtns.addView(mkBtn("送出", true) {
+            val sendLabel = if (test || action != null) "送出" else "複製並開 LINE"
+            rowBtns.addView(mkBtn(sendLabel, true) {
                 val t = et.text.toString().trim()
-                if (action == null) {
-                    android.widget.Toast.makeText(ctx, "測試用：懸浮窗正常！(不會真的送出)", android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    if (t.isNotEmpty()) LineListener.fireReply(ctx, action, t)
-                    LineListener.log("已送出「$sender」：$t")
+                when {
+                    test -> android.widget.Toast.makeText(ctx, "測試用：懸浮窗正常！(不會真的送出)", android.widget.Toast.LENGTH_SHORT).show()
+                    action != null -> {
+                        if (t.isNotEmpty()) LineListener.fireReply(ctx, action, t)
+                        LineListener.log("已送出「$sender」：$t")
+                    }
+                    else -> {
+                        LineListener.copyTo(ctx, t)
+                        runCatching { openIntent?.send() }
+                        android.widget.Toast.makeText(ctx, "已複製回覆，請在 LINE 長按貼上送出", android.widget.Toast.LENGTH_LONG).show()
+                        LineListener.log("已複製並開啟 LINE「$sender」")
+                    }
                 }
                 remove()
             })
