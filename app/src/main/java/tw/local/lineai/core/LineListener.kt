@@ -60,6 +60,9 @@ class LineListener : NotificationListenerService() {
                 val ok = fireReply(this, action, ans)
                 lastReplyAt[key] = System.currentTimeMillis()
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
+            } else if (Prefs.useOverlay && Overlay.canShow(this)) {
+                Overlay.show(this, title, text, ans, action)
+                log("已擬稿給「$title」：$ans（看懸浮視窗）")
             } else {
                 postDraft(this, title, ans, action)
                 log("已擬稿給「$title」：$ans（看通知按送出）")
