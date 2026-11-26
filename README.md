@@ -18,3 +18,6 @@
 
 ## 下載
 到 [Releases](../../releases/latest) 下載 `LineAiReply.apk`。
+
+## 授權
+本專案採 **GPLv3** 授權，為獨立開發。程式僅在本機運行；訊息內容會送到你自行設定的 AI 供應商（如 Google Gemini）以取得回覆，API 金鑰只存在你手機本機、不會上傳到其他地方。
