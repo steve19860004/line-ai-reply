@@ -101,6 +101,13 @@ class MainActivity : Activity() {
                 else if (Prefs.enabled) "已啟用，但通知監聽尚未連上（到①開啟並重開 App）"
                 else "未啟用", color = sub
             )
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            val exempt = pm.isIgnoringBatteryOptimizations(packageName)
+            text(if (exempt) "省電限制：已關閉（休眠也能回）✓" else "省電限制：仍在限制 ✗（休眠可能收不到/不回）", color = if (exempt) sub else bad)
+            if (!exempt) button("關閉省電限制（背景常駐，休眠也能回）", primary = true) {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName")))
+            }
+            text("※ 想在睡覺／螢幕關閉時也自動回，請：開「全自動送出」＋關省電限制；vivo／小米另到設定開本 App 的「自啟動」。", color = sub)
         }
         // 5. 最近事件（除錯）
         card("⑤ 最近事件（除錯用）") {
