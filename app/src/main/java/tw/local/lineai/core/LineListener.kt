@@ -28,12 +28,15 @@ class LineListener : NotificationListenerService() {
         val n = sbn.notification ?: return
         val ex = n.extras
 
-        val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: return
+        val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
         val text = latestMessage(ex) ?: ex.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
-        if (text.isBlank()) { log("「$title」無文字(可能貼圖/圖片)，略過"); return }
 
-        // 防回覆迴圈：這則通知已經被回覆過（含我們自己送出的），就不要再處理
-        if (!ex.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY).isNullOrEmpty()) return
+        // LINE 會發摘要通知（無標題），略過不吵
+        if (title.isNullOrBlank()) return
+        // 診斷：只要是有內文的 LINE 通知就先記一筆，方便看到底收到什麼
+        val hasAction = n.actions?.any { !it.remoteInputs.isNullOrEmpty() } == true
+        if (text.isBlank()) { log("「$title」無文字(貼圖/圖片)，略過"); return }
+        log("偵測到「$title」：$text（回覆鈕：${if (hasAction) "有" else "無"}）")
 
         val isGroup = ex.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false)
         if (isGroup && !Prefs.replyGroups) { log("「$title」是群組，略過"); return }
