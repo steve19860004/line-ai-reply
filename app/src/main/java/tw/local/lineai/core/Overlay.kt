@@ -30,7 +30,10 @@ object Overlay {
         }
     }
 
-    fun show(ctx: Context, sender: String, incoming: String, draft: String, action: Notification.Action) {
+    /** 測試用：顯示一張假草稿卡，驗證懸浮窗會不會出現。 */
+    fun showTest(ctx: Context) = show(ctx, "測試好友", "在嗎？晚上有空嗎", "有啊，怎麼了？", null)
+
+    fun show(ctx: Context, sender: String, incoming: String, draft: String, action: Notification.Action?) {
         App.ui {
             if (!canShow(ctx)) return@ui
             runCatching { view?.let { wm?.removeView(it) } }
@@ -66,8 +69,12 @@ object Overlay {
             }
             rowBtns.addView(mkBtn("送出", true) {
                 val t = et.text.toString().trim()
-                if (t.isNotEmpty()) LineListener.fireReply(ctx, action, t)
-                LineListener.log("已送出「$sender」：$t")
+                if (action == null) {
+                    android.widget.Toast.makeText(ctx, "測試用：懸浮窗正常！(不會真的送出)", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    if (t.isNotEmpty()) LineListener.fireReply(ctx, action, t)
+                    LineListener.log("已送出「$sender」：$t")
+                }
                 remove()
             })
             rowBtns.addView(mkBtn("重擬", false) {
