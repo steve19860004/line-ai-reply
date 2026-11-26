@@ -2,6 +2,8 @@ package tw.local.lineai.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** 所有設定集中在這裡。 */
 object Prefs {
@@ -91,6 +93,63 @@ object Prefs {
     var safetyBrake: Boolean
         get() = sp.getBoolean("safety_brake", true)
         set(v) = sp.edit().putBoolean("safety_brake", v).apply()
+
+    // 新朋友自動歡迎語
+    var welcomeEnabled: Boolean
+        get() = sp.getBoolean("welcome_enabled", false)
+        set(v) = sp.edit().putBoolean("welcome_enabled", v).apply()
+    var welcomeText: String
+        get() = sp.getString("welcome_text", DEFAULT_WELCOME)!!
+        set(v) = sp.edit().putString("welcome_text", v).apply()
+    var knownContacts: Set<String>
+        get() = sp.getStringSet("known_contacts", emptySet())!!.toSet()
+        set(v) = sp.edit().putStringSet("known_contacts", v).apply()
+
+    /** 匯出所有設定成 JSON 文字（含 API 金鑰，請妥善保管）。 */
+    fun exportJson(): String = JSONObject().apply {
+        put("v", 1)
+        put("provider", provider); put("apiKey", apiKey)
+        put("model", sp.getString("model", "")); put("endpoint", endpoint); put("persona", persona)
+        put("autoSend", autoSend); put("useOverlay", useOverlay)
+        put("replyGroups", replyGroups); put("onlyWhitelist", onlyWhitelist)
+        put("whitelist", JSONArray(whitelist.toList()))
+        put("delaySec", delaySec); put("maxDay", maxPerContactPerDay)
+        put("kwEnabled", keywordEnabled); put("kwSkipAi", keywordSkipAi); put("kwRules", keywordRules)
+        put("hoursEnabled", hoursEnabled); put("hoursStart", hoursStart); put("hoursEnd", hoursEnd)
+        put("replyOnce", replyOnce); put("safetyBrake", safetyBrake)
+        put("welcomeEnabled", welcomeEnabled); put("welcomeText", welcomeText)
+    }.toString(2)
+
+    /** 從匯出的 JSON 還原設定；成功回 true。 */
+    fun importJson(s: String): Boolean = try {
+        val o = JSONObject(s)
+        if (o.has("provider")) provider = o.getString("provider")
+        if (o.has("apiKey")) apiKey = o.getString("apiKey")
+        if (o.has("model")) model = o.getString("model")
+        if (o.has("endpoint")) endpoint = o.getString("endpoint")
+        if (o.has("persona")) persona = o.getString("persona")
+        if (o.has("autoSend")) autoSend = o.getBoolean("autoSend")
+        if (o.has("useOverlay")) useOverlay = o.getBoolean("useOverlay")
+        if (o.has("replyGroups")) replyGroups = o.getBoolean("replyGroups")
+        if (o.has("onlyWhitelist")) onlyWhitelist = o.getBoolean("onlyWhitelist")
+        if (o.has("whitelist")) { val a = o.getJSONArray("whitelist"); whitelist = (0 until a.length()).map { a.getString(it) }.toSet() }
+        if (o.has("delaySec")) delaySec = o.getInt("delaySec")
+        if (o.has("maxDay")) maxPerContactPerDay = o.getInt("maxDay")
+        if (o.has("kwEnabled")) keywordEnabled = o.getBoolean("kwEnabled")
+        if (o.has("kwSkipAi")) keywordSkipAi = o.getBoolean("kwSkipAi")
+        if (o.has("kwRules")) keywordRules = o.getString("kwRules")
+        if (o.has("hoursEnabled")) hoursEnabled = o.getBoolean("hoursEnabled")
+        if (o.has("hoursStart")) hoursStart = o.getInt("hoursStart")
+        if (o.has("hoursEnd")) hoursEnd = o.getInt("hoursEnd")
+        if (o.has("replyOnce")) replyOnce = o.getBoolean("replyOnce")
+        if (o.has("safetyBrake")) safetyBrake = o.getBoolean("safetyBrake")
+        if (o.has("welcomeEnabled")) welcomeEnabled = o.getBoolean("welcomeEnabled")
+        if (o.has("welcomeText")) welcomeText = o.getString("welcomeText")
+        true
+    } catch (_: Exception) { false }
+
+    const val DEFAULT_WELCOME =
+        "您好～我是師傅的 AI 小幫手，先幫忙了解需求，師傅看到會親自回覆您。方便先給我地址和冷氣品牌型號嗎？"
 
     const val DEFAULT_PERSONA =
         "你是我本人，用我平常在 LINE 上的口氣用繁體中文簡短回覆對方。親切自然、不要太正式、不要像客服或機器人、不要加開頭招呼或署名，直接回話。一句到兩句即可。看不懂或不該代答的訊息就回空字串。"
