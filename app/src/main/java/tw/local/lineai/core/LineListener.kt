@@ -45,10 +45,16 @@ class LineListener : NotificationListenerService() {
         val isGroup = ex.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false)
         if (isGroup && !Prefs.replyGroups) { log("「$title」是群組，略過"); return }
 
+        // 急件關鍵字提醒：不受白名單限制，出現即通知本人（避免急單被埋沒）
+        if (Prefs.urgentEnabled && matchUrgent(text)) postUrgent(this, title, text, n.contentIntent)
+
         // 白名單：模糊比對（名稱有包含即可，不分大小寫）
         if (Prefs.onlyWhitelist && Prefs.whitelist.none { title.contains(it, true) }) {
             log("「$title」不在白名單，略過"); return
         }
+
+        // 黑名單：永不自動回
+        if (Prefs.blacklist.any { title.contains(it, true) }) { log("「$title」在黑名單，略過不回"); return }
 
         val action = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
         val openIntent = n.contentIntent  // 開啟該 LINE 對話用（沒有回覆鈕時的備援）
@@ -68,18 +74,25 @@ class LineListener : NotificationListenerService() {
             // 新朋友歡迎語：第一次遇到這個對話 → 先回歡迎語（之後正常流程）
             val isNew = title !in Prefs.knownContacts
             if (isNew) Prefs.knownContacts = Prefs.knownContacts + title
-            val base: String = if (Prefs.welcomeEnabled && isNew && Prefs.welcomeText.isNotBlank()) {
-                log("新朋友「$title」→ 歡迎語"); Prefs.welcomeText
-            } else {
-                // B：關鍵字優先（命中可免 AI）
-                val kw = matchKeyword(text)
-                if (kw != null && Prefs.keywordSkipAi) {
-                    log("關鍵字命中 →「$kw」"); kw
-                } else {
-                    val ai = Ai.reply(text, title).getOrElse { log("AI 失敗：${it.message}"); return@bg }
-                    if (ai.isBlank()) {
-                        if (kw != null) kw else { log("「$title」AI 判斷不回(空回覆)"); return@bg }
-                    } else ai
+            val base: String = when {
+                // 外出/忙碌模式最優先：一律回固定訊息
+                Prefs.awayEnabled && Prefs.awayText.isNotBlank() -> {
+                    log("外出模式 →「${Prefs.awayText}」"); Prefs.awayText
+                }
+                Prefs.welcomeEnabled && isNew && Prefs.welcomeText.isNotBlank() -> {
+                    log("新朋友「$title」→ 歡迎語"); Prefs.welcomeText
+                }
+                else -> {
+                    // B：關鍵字優先（命中可免 AI）
+                    val kw = matchKeyword(text)
+                    if (kw != null && Prefs.keywordSkipAi) {
+                        log("關鍵字命中 →「$kw」"); kw
+                    } else {
+                        val ai = Ai.reply(text, title, buildHistory(this, title)).getOrElse { log("AI 失敗：${it.message}"); return@bg }
+                        if (ai.isBlank()) {
+                            if (kw != null) kw else { log("「$title」AI 判斷不回(空回覆)"); return@bg }
+                        } else ai
+                    }
                 }
             }
             val ans = applyVars(base, title)  // 變數替換 {名字}{時間}
@@ -87,7 +100,8 @@ class LineListener : NotificationListenerService() {
             // C/D：是否允許自動送出
             val windowOk = inAutoWindow()
             val alreadyOnce = Prefs.replyOnce && Prefs.repliedContacts.any { title.equals(it, true) }
-            val autoAllowed = Prefs.autoSend && action != null && windowOk && !alreadyOnce
+            val dayOk = dayCountOk(title)  // 每日每人上限
+            val autoAllowed = Prefs.autoSend && action != null && windowOk && !alreadyOnce && dayOk
 
             if (autoAllowed) {
                 // E：安全煞車（短時間自動回太多次 → 疑似迴圈，切回擬稿保護 LINE）
@@ -102,6 +116,7 @@ class LineListener : NotificationListenerService() {
                 if (ok) {
                     lastSentReply[key] = ans  // 記住剛送出的，避免被自己的回覆觸發迴圈
                     replyTimes.addFirst(System.currentTimeMillis())
+                    incDayCount(title)
                     if (Prefs.replyOnce) Prefs.repliedContacts = Prefs.repliedContacts + title
                 }
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
@@ -109,6 +124,7 @@ class LineListener : NotificationListenerService() {
                 when {
                     Prefs.autoSend && !windowOk -> log("「$title」非自動時段，改擬稿")
                     Prefs.autoSend && alreadyOnce -> log("「$title」已自動回過一次，改擬稿交給你")
+                    Prefs.autoSend && !dayOk -> log("「$title」今天已達自動回上限，改擬稿")
                     Prefs.autoSend && action == null -> log("「$title」無回覆鈕，改擬稿")
                 }
                 deliverDraft(this, title, text, ans, action, openIntent)
@@ -165,6 +181,20 @@ class LineListener : NotificationListenerService() {
             .replace("{日期}", ymd).replace("{date}", ymd)
     }
 
+    /** 取這位對方最近幾則舊訊息當前後文（不含目前這則）。 */
+    private fun buildHistory(ctx: android.content.Context, sender: String): String {
+        if (!Prefs.useContext) return ""
+        val prev = MsgStore.bySender(ctx, sender, 6).drop(1).take(5)  // 新到舊、去掉目前這則
+        if (prev.isEmpty()) return ""
+        return prev.reversed().joinToString("\n") { "- ${it.text}" }  // 轉成舊到新
+    }
+
+    /** 急件關鍵字比對。 */
+    private fun matchUrgent(text: String): Boolean {
+        val kws = Prefs.urgentKeywords.split('，', ',', ' ', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+        return kws.any { text.contains(it, true) }
+    }
+
     /** C：現在是否在「可自動送出」的時段（支援跨午夜）。 */
     private fun inAutoWindow(): Boolean {
         if (!Prefs.hoursEnabled) return true
@@ -180,6 +210,28 @@ class LineListener : NotificationListenerService() {
         return replyTimes.size
     }
 
+    private fun today(): String =
+        java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+    private fun rollDay() { val t = today(); if (t != dayKey) { dayKey = t; dayCount.clear() } }
+    private fun dayCountOk(sender: String): Boolean { rollDay(); return (dayCount[sender] ?: 0) < Prefs.maxPerContactPerDay }
+    private fun incDayCount(sender: String) { rollDay(); dayCount[sender] = (dayCount[sender] ?: 0) + 1 }
+
+    /** 急件提醒：另外發一則高優先通知給本人。 */
+    private fun postUrgent(ctx: android.content.Context, sender: String, text: String, open: PendingIntent?) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(CHANNEL_URGENT) == null)
+            nm.createNotificationChannel(NotificationChannel(CHANNEL_URGENT, "急件提醒", NotificationManager.IMPORTANCE_HIGH))
+        val b = Notification.Builder(ctx, CHANNEL_URGENT)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("⚠️ 急件：$sender")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+        if (open != null) b.setContentIntent(open)
+        nm.notify(900000 + (sender.hashCode() and 0xffff), b.build())
+        log("⚠️ 急件提醒：$sender")
+    }
+
     private fun toast(s: String) = App.ui {
         android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_SHORT).show()
     }
@@ -193,6 +245,9 @@ class LineListener : NotificationListenerService() {
         private val lastSentReply = ConcurrentHashMap<String, String>()  // 每個對話最後一次自動送出的內容
         private val replyTimes = java.util.concurrent.ConcurrentLinkedDeque<Long>()  // E：自動送出時間戳
         private const val BRAKE_MAX = 6  // 60 秒內自動送出超過此數 → 觸發安全煞車
+        const val CHANNEL_URGENT = "lineai_urgent"
+        private var dayKey = ""  // 每日計數的日期
+        private val dayCount = ConcurrentHashMap<String, Int>()  // 每人今日自動回次數
 
         // 最近事件（除錯用）
         val events = java.util.concurrent.ConcurrentLinkedDeque<String>()

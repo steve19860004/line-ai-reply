@@ -8,14 +8,17 @@ import java.net.URL
 /** 呼叫雲端 LLM 產生回覆。支援 Gemini 與 OpenAI 相容端點。 */
 object Ai {
 
-    /** 回傳 AI 回覆文字；失敗回 Result.failure。空字串代表「不回」。 */
-    fun reply(incoming: String, sender: String): Result<String> = runCatching {
+    /** 回傳 AI 回覆文字；失敗回 Result.failure。空字串代表「不回」。history 為前後文（可空）。 */
+    fun reply(incoming: String, sender: String, history: String = ""): Result<String> = runCatching {
         val key = Prefs.apiKey
         require(key.isNotBlank()) { "尚未設定 API 金鑰" }
         val sys = Prefs.persona + "\n（對方暱稱：$sender）"
+        val user = if (history.isNotBlank())
+            "（這位對方先前說過的話，供你了解前後文）\n$history\n\n（對方現在說）$incoming"
+        else incoming
         val text = when (Prefs.provider) {
-            "openai" -> callOpenAi(sys, incoming, key)
-            else -> callGemini(sys, incoming, key)
+            "openai" -> callOpenAi(sys, user, key)
+            else -> callGemini(sys, user, key)
         }
         text.trim()
     }
