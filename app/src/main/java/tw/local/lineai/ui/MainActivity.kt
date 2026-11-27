@@ -58,6 +58,7 @@ class MainActivity : Activity() {
             field("語氣／人設（給 AI 的指示）", Prefs.persona, lines = 4) { Prefs.persona = it }
             button("套用人設範例") { pickPersonaTemplate() }
             button("用 AI 幫我產生人設") { generatePersona() }
+            switch("AI 參考前後文（讀這位客人先前訊息，回得更連貫）", Prefs.useContext) { Prefs.useContext = it }
             button("測試 AI（擬一句回覆）") {
                 toast("測試中…")
                 App.bg {
@@ -120,6 +121,15 @@ class MainActivity : Activity() {
                 button("清除「已回一次」紀錄") { Prefs.repliedContacts = emptySet(); toast("已清除"); build() }
             }
             switch("安全煞車（短時間回太多次自動切回擬稿，保護 LINE）", Prefs.safetyBrake) { Prefs.safetyBrake = it }
+            field("黑名單（永不自動回，逗號分隔）", Prefs.blacklist.joinToString("，")) {
+                Prefs.blacklist = it.split('，', ',').map { s -> s.trim() }.filter { s -> s.isNotEmpty() }.toSet()
+            }
+            field("同一人每天自動回上限（次）", Prefs.maxPerContactPerDay.toString(), number = true) {
+                Prefs.maxPerContactPerDay = it.toIntOrNull()?.coerceIn(1, 999) ?: 30
+            }
+            switch("急件關鍵字提醒（出現時另外通知你本人，不受白名單限制）", Prefs.urgentEnabled) { Prefs.urgentEnabled = it; build() }
+            if (Prefs.urgentEnabled)
+                field("急件關鍵字（逗號分隔）", Prefs.urgentKeywords) { Prefs.urgentKeywords = it }
             switch("新朋友自動歡迎語（第一次密你時先回一句）", Prefs.welcomeEnabled) { Prefs.welcomeEnabled = it; build() }
             if (Prefs.welcomeEnabled) {
                 field("歡迎語（可用變數 {名字} {時間}）", Prefs.welcomeText, lines = 3) { Prefs.welcomeText = it }
@@ -132,6 +142,8 @@ class MainActivity : Activity() {
 
         // 6. 總開關
         card("⑥ 總開關") {
+            switch("外出／忙碌模式（期間一律回下方固定訊息）", Prefs.awayEnabled) { Prefs.awayEnabled = it; build() }
+            if (Prefs.awayEnabled) field("外出訊息（可用 {名字}）", Prefs.awayText, lines = 2) { Prefs.awayText = it }
             val listenerOk = notifAccessOn() && LineListener.connected
             switch("啟用 LINE AI 回覆", Prefs.enabled) { on ->
                 if (on && !notifAccessOn()) { toast("請先開啟通知讀取權限"); Prefs.enabled = false; build(); return@switch }
@@ -160,6 +172,12 @@ class MainActivity : Activity() {
                 text("共備份 ${tw.local.lineai.core.MsgStore.count(this@MainActivity)} 則，顯示最近 30 則：", color = sub)
                 val tf = java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.US)
                 for (m in msgs) text("${tf.format(java.util.Date(m.time))}  ${m.sender}：${m.text}", color = sub)
+                button("匯出備份（複製全部）") {
+                    val txt = tw.local.lineai.core.MsgStore.exportText(this@MainActivity)
+                    (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("lineai_msgs", txt))
+                    toast("已複製 ${tw.local.lineai.core.MsgStore.count(this@MainActivity)} 則到剪貼簿")
+                }
                 button("清空備份") { tw.local.lineai.core.MsgStore.clear(this@MainActivity); toast("已清空"); build() }
             }
         }

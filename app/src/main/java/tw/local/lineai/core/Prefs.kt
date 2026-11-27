@@ -105,6 +105,32 @@ object Prefs {
         get() = sp.getStringSet("known_contacts", emptySet())!!.toSet()
         set(v) = sp.edit().putStringSet("known_contacts", v).apply()
 
+    // 外出/忙碌模式：期間一律回固定訊息
+    var awayEnabled: Boolean
+        get() = sp.getBoolean("away_enabled", false)
+        set(v) = sp.edit().putBoolean("away_enabled", v).apply()
+    var awayText: String
+        get() = sp.getString("away_text", DEFAULT_AWAY)!!
+        set(v) = sp.edit().putString("away_text", v).apply()
+
+    // 急件關鍵字提醒（出現時另外通知本人）
+    var urgentEnabled: Boolean
+        get() = sp.getBoolean("urgent_enabled", false)
+        set(v) = sp.edit().putBoolean("urgent_enabled", v).apply()
+    var urgentKeywords: String
+        get() = sp.getString("urgent_kw", "漏水,不冷,沒反應,故障,壞掉,急,停機,跳電")!!
+        set(v) = sp.edit().putString("urgent_kw", v).apply()
+
+    // 黑名單：永不自動回
+    var blacklist: Set<String>
+        get() = sp.getStringSet("blacklist", emptySet())!!.toSet()
+        set(v) = sp.edit().putStringSet("blacklist", v).apply()
+
+    // AI 是否參考前後文
+    var useContext: Boolean
+        get() = sp.getBoolean("use_context", true)
+        set(v) = sp.edit().putBoolean("use_context", v).apply()
+
     /** 匯出所有設定成 JSON 文字（含 API 金鑰，請妥善保管）。 */
     fun exportJson(): String = JSONObject().apply {
         put("v", 1)
@@ -118,6 +144,9 @@ object Prefs {
         put("hoursEnabled", hoursEnabled); put("hoursStart", hoursStart); put("hoursEnd", hoursEnd)
         put("replyOnce", replyOnce); put("safetyBrake", safetyBrake)
         put("welcomeEnabled", welcomeEnabled); put("welcomeText", welcomeText)
+        put("awayEnabled", awayEnabled); put("awayText", awayText)
+        put("urgentEnabled", urgentEnabled); put("urgentKeywords", urgentKeywords)
+        put("blacklist", JSONArray(blacklist.toList())); put("useContext", useContext)
     }.toString(2)
 
     /** 從匯出的 JSON 還原設定；成功回 true。 */
@@ -145,11 +174,20 @@ object Prefs {
         if (o.has("safetyBrake")) safetyBrake = o.getBoolean("safetyBrake")
         if (o.has("welcomeEnabled")) welcomeEnabled = o.getBoolean("welcomeEnabled")
         if (o.has("welcomeText")) welcomeText = o.getString("welcomeText")
+        if (o.has("awayEnabled")) awayEnabled = o.getBoolean("awayEnabled")
+        if (o.has("awayText")) awayText = o.getString("awayText")
+        if (o.has("urgentEnabled")) urgentEnabled = o.getBoolean("urgentEnabled")
+        if (o.has("urgentKeywords")) urgentKeywords = o.getString("urgentKeywords")
+        if (o.has("blacklist")) { val a = o.getJSONArray("blacklist"); blacklist = (0 until a.length()).map { a.getString(it) }.toSet() }
+        if (o.has("useContext")) useContext = o.getBoolean("useContext")
         true
     } catch (_: Exception) { false }
 
     const val DEFAULT_WELCOME =
         "您好～我是師傅的 AI 小幫手，先幫忙了解需求，師傅看到會親自回覆您。方便先給我地址和冷氣品牌型號嗎？"
+
+    const val DEFAULT_AWAY =
+        "師傅目前外出施工中，看到訊息會親自回覆您🙏 急件請直接來電。"
 
     const val DEFAULT_PERSONA =
         "你是我本人，用我平常在 LINE 上的口氣用繁體中文簡短回覆對方。親切自然、不要太正式、不要像客服或機器人、不要加開頭招呼或署名，直接回話。一句到兩句即可。看不懂或不該代答的訊息就回空字串。"

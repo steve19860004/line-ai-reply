@@ -44,5 +44,17 @@ object MsgStore {
     fun count(ctx: Context): Int =
         try { JSONArray(sp(ctx).getString("list", "[]")).length() } catch (_: Exception) { 0 }
 
+    /** 取某位對方最近 n 則（新到舊）。 */
+    fun bySender(ctx: Context, sender: String, n: Int): List<Item> =
+        recent(ctx, 500).filter { it.sender == sender }.take(n)
+
+    /** 匯出全部備份成文字（舊到新）。 */
+    fun exportText(ctx: Context): String {
+        val tf = java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.US)
+        return recent(ctx, 500).reversed().joinToString("\n") {
+            "${tf.format(java.util.Date(it.time))}  ${it.sender}：${it.text}"
+        }
+    }
+
     fun clear(ctx: Context) { sp(ctx).edit().remove("list").apply() }
 }
