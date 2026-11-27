@@ -59,6 +59,13 @@ class LineListener : NotificationListenerService() {
         val action = n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
         val openIntent = n.contentIntent  // 開啟該 LINE 對話用（沒有回覆鈕時的備援）
 
+        // 同一則訊息，LINE 常同時發「有回覆鈕」「無回覆鈕」兩個通知。
+        // 有鈕那個會自動送出，就先標記，讓無鈕那個不要又跳多餘的懸浮視窗草稿。
+        val msgKey = "$title\u0001$text"
+        val intendAuto = Prefs.autoSend && action != null && inAutoWindow() &&
+            !(Prefs.replyOnce && Prefs.repliedContacts.any { title.equals(it, true) }) && dayCountOk(title)
+        if (intendAuto) autoPending[msgKey] = System.currentTimeMillis()
+
         val key = sbn.key ?: title
         if (text == lastSentReply[key]) return  // 這句正是我們剛送出的回覆（回聲），略過
         if (lastHandled[key] == text) return  // 同一句不重複
@@ -111,16 +118,23 @@ class LineListener : NotificationListenerService() {
                     deliverDraft(this, title, text, ans, action, openIntent)
                     return@bg
                 }
+                // 避免同一則訊息的雙通知各送一次
+                if (recentMsg(autoFired, msgKey)) { log("「$title」已自動回覆過(重複通知)，略過"); return@bg }
                 val ok = fireReply(this, action, ans)
                 lastReplyAt[key] = System.currentTimeMillis()
                 if (ok) {
                     lastSentReply[key] = ans  // 記住剛送出的，避免被自己的回覆觸發迴圈
+                    autoFired[msgKey] = System.currentTimeMillis()
                     replyTimes.addFirst(System.currentTimeMillis())
                     incDayCount(title)
                     if (Prefs.replyOnce) Prefs.repliedContacts = Prefs.repliedContacts + title
                 }
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
             } else {
+                // 同一則訊息已由「有回覆鈕」的通知自動送出（或正要送出）→ 不要再跳多餘草稿
+                if (recentMsg(autoPending, msgKey) || recentMsg(autoFired, msgKey)) {
+                    log("「$title」已由自動回覆處理，略過多餘草稿"); return@bg
+                }
                 when {
                     Prefs.autoSend && !windowOk -> log("「$title」非自動時段，改擬稿")
                     Prefs.autoSend && alreadyOnce -> log("「$title」已自動回過一次，改擬稿交給你")
@@ -208,6 +222,12 @@ class LineListener : NotificationListenerService() {
         return if (s <= e) h in s until e else (h >= s || h < e)
     }
 
+    /** 這則訊息(標題+內文)最近是否已被標記/送出（用於雙通知去重）。 */
+    private fun recentMsg(m: java.util.concurrent.ConcurrentHashMap<String, Long>, k: String): Boolean {
+        val t = m[k] ?: return false
+        return System.currentTimeMillis() - t < MSG_DEDUP_MS
+    }
+
     /** E：最近 60 秒內自動送出的次數。 */
     private fun recentReplies(): Int {
         val now = System.currentTimeMillis()
@@ -253,6 +273,9 @@ class LineListener : NotificationListenerService() {
         const val CHANNEL_URGENT = "lineai_urgent"
         private var dayKey = ""  // 每日計數的日期
         private val dayCount = ConcurrentHashMap<String, Int>()  // 每人今日自動回次數
+        private val autoPending = ConcurrentHashMap<String, Long>()  // (標題+內文) → 準備自動送出的時間
+        private val autoFired = ConcurrentHashMap<String, Long>()    // (標題+內文) → 已自動送出的時間
+        private const val MSG_DEDUP_MS = 20_000L  // 同訊息雙通知去重的時間窗
 
         // 最近事件（除錯用）
         val events = java.util.concurrent.ConcurrentLinkedDeque<String>()
