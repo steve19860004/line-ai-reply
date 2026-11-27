@@ -181,12 +181,17 @@ class LineListener : NotificationListenerService() {
             .replace("{日期}", ymd).replace("{date}", ymd)
     }
 
-    /** 取這位對方最近幾則舊訊息當前後文（不含目前這則）。 */
+    /** 前後文：優先用匯入的 LINE 聊天記錄，再補上通知欄抓到的近期訊息。 */
     private fun buildHistory(ctx: android.content.Context, sender: String): String {
         if (!Prefs.useContext) return ""
+        val imported = CtxStore.get(ctx, sender)
         val prev = MsgStore.bySender(ctx, sender, 6).drop(1).take(5)  // 新到舊、去掉目前這則
-        if (prev.isEmpty()) return ""
-        return prev.reversed().joinToString("\n") { "- ${it.text}" }  // 轉成舊到新
+        val live = if (prev.isEmpty()) "" else prev.reversed().joinToString("\n") { "- ${it.text}" }
+        return when {
+            imported.isNotBlank() && live.isNotBlank() -> "$imported\n$live"
+            imported.isNotBlank() -> imported
+            else -> live
+        }
     }
 
     /** 急件關鍵字比對。 */

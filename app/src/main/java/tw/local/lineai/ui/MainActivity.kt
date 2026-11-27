@@ -21,6 +21,8 @@ class MainActivity : Activity() {
     private val pad by lazy { dp(16) }
     private lateinit var root: LinearLayout
 
+    companion object { private const val REQ_IMPORT = 7001 }
+
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         val scroll = ScrollView(this)
@@ -59,6 +61,12 @@ class MainActivity : Activity() {
             button("套用人設範例") { pickPersonaTemplate() }
             button("用 AI 幫我產生人設") { generatePersona() }
             switch("AI 參考前後文（讀這位客人先前訊息，回得更連貫）", Prefs.useContext) { Prefs.useContext = it }
+            button("匯入 LINE 聊天記錄當前後文") { importChat() }
+            val imp = tw.local.lineai.core.CtxStore.contacts(this@MainActivity)
+            if (imp.isNotEmpty()) {
+                text("已匯入前後文：${imp.joinToString("、")}", color = sub)
+                button("清除匯入的前後文") { tw.local.lineai.core.CtxStore.clearAll(this@MainActivity); toast("已清除"); build() }
+            }
             button("測試 AI（擬一句回覆）") {
                 toast("測試中…")
                 App.bg {
@@ -312,6 +320,37 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    // 匯入 LINE 匯出的聊天記錄 .txt 當前後文
+    private fun importChat() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("text/plain")
+        try { startActivityForResult(i, REQ_IMPORT) } catch (e: Exception) { toast("找不到檔案選擇器") }
+    }
+
+    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
+        super.onActivityResult(req, res, data)
+        if (req != REQ_IMPORT || res != RESULT_OK) return
+        val uri = data?.data ?: return
+        val raw = try { contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } } catch (e: Exception) { null }
+        if (raw.isNullOrBlank()) { toast("讀取失敗或檔案是空的"); return }
+        val r = tw.local.lineai.core.LineChatParser.parse(raw)
+        if (r.count == 0) { toast("看起來不是 LINE 聊天記錄格式"); return }
+        val et = EditText(this).apply {
+            setText(r.name)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("匯入前後文（共 ${r.count} 則，取最後 40 則）")
+            .setMessage("請確認對象名稱，需與 LINE 聊天室顯示的名稱一致，AI 才對得上。")
+            .setView(et)
+            .setPositiveButton("匯入") { _, _ ->
+                val nm = et.text.toString().trim()
+                if (nm.isEmpty()) { toast("請填對象名稱"); return@setPositiveButton }
+                tw.local.lineai.core.CtxStore.set(this, nm, r.history)
+                toast("已匯入「$nm」的前後文"); build()
+            }
+            .setNegativeButton("取消", null).show()
     }
 
     // 用 AI 依描述產生人設
