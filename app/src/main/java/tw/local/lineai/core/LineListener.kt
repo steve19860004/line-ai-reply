@@ -120,8 +120,7 @@ class LineListener : NotificationListenerService() {
                 }
                 // 避免同一則訊息的雙通知各送一次
                 if (recentMsg(autoFired, msgKey)) { log("「$title」已自動回覆過(重複通知)，略過"); return@bg }
-                val sendAction = liveReplyAction(key) ?: action  // 送出前重抓當下還活著的回覆鈕
-                val ok = fireReply(this, sendAction, ans)
+                val ok = fireReply(this, action, ans)  // 用觸發這則的最新通知按鈕，不從通知列重抓舊的
                 lastReplyAt[key] = System.currentTimeMillis()
                 if (ok) {
                     lastSentReply[key] = ans  // 記住剛送出的，避免被自己的回覆觸發迴圈
@@ -221,13 +220,6 @@ class LineListener : NotificationListenerService() {
         val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         val s = Prefs.hoursStart; val e = Prefs.hoursEnd
         return if (s <= e) h in s until e else (h >= s || h < e)
-    }
-
-    /** 送出前重新抓目前還在通知列、屬於同一則(key)的即時回覆鈕，避免用到失效的舊按鈕。 */
-    private fun liveReplyAction(key: String): Notification.Action? {
-        val sbns = runCatching { activeNotifications }.getOrNull() ?: return null
-        val sbn = sbns.firstOrNull { it.key == key } ?: return null
-        return sbn.notification?.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
     }
 
     /** 這則訊息(標題+內文)最近是否已被標記/送出（用於雙通知去重）。 */
