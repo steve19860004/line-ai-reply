@@ -14,7 +14,7 @@ object Ai {
         require(key.isNotBlank()) { "尚未設定 API 金鑰" }
         val sys = Prefs.persona + "\n（對方暱稱：$sender）"
         val user = if (history.isNotBlank())
-            "（這位對方先前說過的話，供你了解前後文）\n$history\n\n（對方現在說）$incoming"
+            "（先前的對話記錄，供你了解前後文）\n$history\n\n（對方現在說）$incoming"
         else incoming
         val text = when (Prefs.provider) {
             "openai" -> callOpenAi(sys, user, key)
