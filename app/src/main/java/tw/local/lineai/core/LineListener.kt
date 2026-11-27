@@ -128,6 +128,9 @@ class LineListener : NotificationListenerService() {
                     replyTimes.addFirst(System.currentTimeMillis())
                     incDayCount(title)
                     if (Prefs.replyOnce) Prefs.repliedContacts = Prefs.repliedContacts + title
+                    // 送出後清掉這則通知，逼 LINE 下次對同一人給「全新的回覆鈕」，
+                    // 解決「同一對話第一句後就送不出去」（回覆鈕用過一次失效）的問題
+                    sbn.key?.let { runCatching { cancelNotification(it) } }
                 }
                 log(if (ok) "已自動回覆「$title」：$ans" else "送出失敗「$title」")
             } else {
